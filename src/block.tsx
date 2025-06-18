@@ -1,10 +1,16 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { PointerLockControls, Text, Box } from '@react-three/drei';
+import { PointerLockControls, Text } from '@react-three/drei';
 import * as THREE from 'three';
 
 interface BlockProps {
   title?: string;
+}
+
+interface GameState {
+  score: number;
+  ammo: number;
+  bullets: Array<{ id: number, position: THREE.Vector3, direction: THREE.Vector3 }>;
 }
 
 // Enemy component
@@ -75,6 +81,123 @@ function Bullet({ position, direction, onRemove }: {
   );
 }
 
+// Game scene component
+function GameScene({ gameState, setGameState }: { 
+  gameState: GameState, 
+  setGameState: React.Dispatch<React.SetStateAction<GameState>> 
+}) {
+  const { camera, gl } = useThree();
+  const bulletIdCounter = useRef(0);
+  
+  const enemies = [
+    { id: 1, position: [5, 1, -10] as [number, number, number] },
+    { id: 2, position: [-5, 1, -15] as [number, number, number] },
+    { id: 3, position: [0, 2, -20] as [number, number, number] },
+    { id: 4, position: [8, 1, -12] as [number, number, number] },
+    { id: 5, position: [-8, 1, -18] as [number, number, number] },
+  ];
+
+  const shoot = useCallback(() => {
+    if (gameState.ammo <= 0) return;
+    
+    setGameState(prev => ({ ...prev, ammo: prev.ammo - 1 }));
+    
+    const direction = new THREE.Vector3(0, 0, -1);
+    direction.applyQuaternion(camera.quaternion);
+    
+    const newBullet = {
+      id: bulletIdCounter.current++,
+      position: camera.position.clone(),
+      direction: direction.normalize()
+    };
+    
+    setGameState(prev => ({ 
+      ...prev, 
+      bullets: [...prev.bullets, newBullet] 
+    }));
+  }, [camera, gameState.ammo, setGameState]);
+
+  const removeBullet = useCallback((bulletId: number) => {
+    setGameState(prev => ({
+      ...prev,
+      bullets: prev.bullets.filter(bullet => bullet.id !== bulletId)
+    }));
+  }, [setGameState]);
+
+  const handleEnemyHit = useCallback((enemyId: number) => {
+    setGameState(prev => ({ ...prev, score: prev.score + 10 }));
+  }, [setGameState]);
+
+  const reload = useCallback(() => {
+    setGameState(prev => ({ ...prev, ammo: 30 }));
+  }, [setGameState]);
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      if (document.pointerLockElement === gl.domElement) {
+        shoot();
+      }
+    };
+
+    const handleKeyPress = (event: KeyboardEvent) => {
+      if (event.code === 'KeyR') {
+        reload();
+      }
+    };
+
+    window.addEventListener('click', handleClick);
+    window.addEventListener('keydown', handleKeyPress);
+    
+    return () => {
+      window.removeEventListener('click', handleClick);
+      window.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [shoot, reload, gl.domElement]);
+
+  return (
+    <>
+      {/* Lighting */}
+      <ambientLight intensity={0.3} />
+      <directionalLight position={[10, 10, 5]} intensity={1} />
+      
+      {/* Ground */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2, 0]}>
+        <planeGeometry args={[100, 100]} />
+        <meshStandardMaterial color="#228B22" />
+      </mesh>
+      
+      {/* Sky */}
+      <mesh>
+        <sphereGeometry args={[50]} />
+        <meshBasicMaterial color="#87CEEB" side={THREE.BackSide} />
+      </mesh>
+      
+      {/* Enemies */}
+      {enemies.map(enemy => (
+        <Enemy
+          key={enemy.id}
+          id={enemy.id}
+          position={enemy.position}
+          onHit={handleEnemyHit}
+        />
+      ))}
+      
+      {/* Bullets */}
+      {gameState.bullets.map(bullet => (
+        <Bullet
+          key={bullet.id}
+          position={bullet.position}
+          direction={bullet.direction}
+          onRemove={() => removeBullet(bullet.id)}
+        />
+      ))}
+      
+      {/* Controls */}
+      <PointerLockControls makeDefault />
+    </>
+  );
+}
+
 // Crosshair component
 function Crosshair() {
   return (
@@ -108,147 +231,45 @@ function Crosshair() {
   );
 }
 
-// Game scene component
-function GameScene() {
-  const { camera, gl } = useThree();
-  const [bullets, setBullets] = useState<Array<{ id: number, position: THREE.Vector3, direction: THREE.Vector3 }>>([]);
-  const [score, setScore] = useState(0);
-  const [ammo, setAmmo] = useState(30);
-  const bulletIdCounter = useRef(0);
-  
-  const enemies = [
-    { id: 1, position: [5, 1, -10] as [number, number, number] },
-    { id: 2, position: [-5, 1, -15] as [number, number, number] },
-    { id: 3, position: [0, 2, -20] as [number, number, number] },
-    { id: 4, position: [8, 1, -12] as [number, number, number] },
-    { id: 5, position: [-8, 1, -18] as [number, number, number] },
-  ];
-
-  const shoot = useCallback(() => {
-    if (ammo <= 0) return;
-    
-    setAmmo(prev => prev - 1);
-    
-    const direction = new THREE.Vector3(0, 0, -1);
-    direction.applyQuaternion(camera.quaternion);
-    
-    const newBullet = {
-      id: bulletIdCounter.current++,
-      position: camera.position.clone(),
-      direction: direction.normalize()
-    };
-    
-    setBullets(prev => [...prev, newBullet]);
-  }, [camera, ammo]);
-
-  const removeBullet = useCallback((bulletId: number) => {
-    setBullets(prev => prev.filter(bullet => bullet.id !== bulletId));
-  }, []);
-
-  const handleEnemyHit = useCallback((enemyId: number) => {
-    setScore(prev => prev + 10);
-  }, []);
-
-  const reload = useCallback(() => {
-    setAmmo(30);
-  }, []);
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      if (document.pointerLockElement === gl.domElement) {
-        shoot();
-      }
-    };
-
-    const handleKeyPress = (event: KeyboardEvent) => {
-      if (event.code === 'KeyR') {
-        reload();
-      }
-    };
-
-    window.addEventListener('click', handleClick);
-    window.addEventListener('keydown', handleKeyPress);
-    
-    return () => {
-      window.removeEventListener('click', handleClick);
-      window.removeEventListener('keydown', handleKeyPress);
-    };
-  }, [shoot, reload, gl.domElement]);
-
-  // Send completion event when score reaches 50
-  useEffect(() => {
-    if (score >= 50) {
-      window.postMessage({ type: 'BLOCK_COMPLETION', blockId: 'mini-fps-game', completed: true, score, maxScore: 50 }, '*');
-      window.parent.postMessage({ type: 'BLOCK_COMPLETION', blockId: 'mini-fps-game', completed: true, score, maxScore: 50 }, '*');
-    }
-  }, [score]);
-
+// HUD component
+function HUD({ score, ammo }: { score: number, ammo: number }) {
   return (
-    <>
-      {/* Lighting */}
-      <ambientLight intensity={0.3} />
-      <directionalLight position={[10, 10, 5]} intensity={1} />
-      
-      {/* Ground */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2, 0]}>
-        <planeGeometry args={[100, 100]} />
-        <meshStandardMaterial color="#228B22" />
-      </mesh>
-      
-      {/* Sky */}
-      <mesh>
-        <sphereGeometry args={[50]} />
-        <meshBasicMaterial color="#87CEEB" side={THREE.BackSide} />
-      </mesh>
-      
-      {/* Enemies */}
-      {enemies.map(enemy => (
-        <Enemy
-          key={enemy.id}
-          id={enemy.id}
-          position={enemy.position}
-          onHit={handleEnemyHit}
-        />
-      ))}
-      
-      {/* Bullets */}
-      {bullets.map(bullet => (
-        <Bullet
-          key={bullet.id}
-          position={bullet.position}
-          direction={bullet.direction}
-          onRemove={() => removeBullet(bullet.id)}
-        />
-      ))}
-      
-      {/* Controls */}
-      <PointerLockControls makeDefault />
-      
-      {/* HUD */}
-      <div style={{
-        position: 'fixed',
-        top: '20px',
-        left: '20px',
-        color: 'white',
-        fontSize: '18px',
-        fontFamily: 'monospace',
-        zIndex: 1000,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        padding: '10px',
-        borderRadius: '5px'
-      }}>
-        <div>Score: {score}</div>
-        <div>Ammo: {ammo}/30</div>
-        <div style={{ fontSize: '12px', marginTop: '5px' }}>
-          Click to shoot | R to reload
-        </div>
+    <div style={{
+      position: 'fixed',
+      top: '20px',
+      left: '20px',
+      color: 'white',
+      fontSize: '18px',
+      fontFamily: 'monospace',
+      zIndex: 1000,
+      backgroundColor: 'rgba(0,0,0,0.7)',
+      padding: '10px',
+      borderRadius: '5px'
+    }}>
+      <div>Score: {score}</div>
+      <div>Ammo: {ammo}/30</div>
+      <div style={{ fontSize: '12px', marginTop: '5px' }}>
+        Click to shoot | R to reload
       </div>
-    </>
+    </div>
   );
 }
 
 const Block: React.FC<BlockProps> = ({ title = "Mini FPS Game" }) => {
   const [gameStarted, setGameStarted] = useState(false);
+  const [gameState, setGameState] = useState<GameState>({
+    score: 0,
+    ammo: 30,
+    bullets: []
+  });
+
+  // Send completion event when score reaches 50
+  useEffect(() => {
+    if (gameState.score >= 50) {
+      window.postMessage({ type: 'BLOCK_COMPLETION', blockId: 'mini-fps-game', completed: true, score: gameState.score, maxScore: 50 }, '*');
+      window.parent.postMessage({ type: 'BLOCK_COMPLETION', blockId: 'mini-fps-game', completed: true, score: gameState.score, maxScore: 50 }, '*');
+    }
+  }, [gameState.score]);
 
   if (!gameStarted) {
     return (
@@ -308,9 +329,10 @@ const Block: React.FC<BlockProps> = ({ title = "Mini FPS Game" }) => {
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
       <Canvas camera={{ position: [0, 1, 0], fov: 75 }}>
-        <GameScene />
+        <GameScene gameState={gameState} setGameState={setGameState} />
       </Canvas>
       <Crosshair />
+      <HUD score={gameState.score} ammo={gameState.ammo} />
     </div>
   );
 };
